@@ -1,0 +1,496 @@
+### Content
++ [`info`](#info)
++ [`session`](#session)
++ [`upgrade`](#upgrade)
++ [`shutdown`](#shutdown)
++ [`reboot`](#reboot)
++ [`datetime`](#datetime)
++ [`mode`](#mode)
++ [`Gallery interface`](#gallery)
++ [`still`](#still)
++ [`movie`](#recording)
++ [`setting`](#setting)
++ [`streaming`](#streaming)
++ [`magnify`](#mag)
++ [`AF`](#af)
+
+### General
+
+WIFI is only available in ap mode, sta mode is not implemented :-/
+The WIFI IP is 10.98.32.1, port is 80
+The WIFI Default Password is 12345678
+
+WIFI is disabled when enabling USB Networking (via camera LCD -Settings -USB Networking -ON) 
+The USB RDNIS IP of the camera is 192.168.168.1
+To connect to it via USB you will need to connect the camera to your PC and configure the PC's USB port with an IP address 192.168.168.2 /255.255.255.0
+The easiest way to do this is on a linux machine. in ubuntu network dialog, look for wired icon with two arrows,click on Options... add Static IP
+IP Address of 192.168.168.2/255.255.255.0 with a default gateway of 192.168.168.1
+not necessary: use lsusb to find the hardware address of usb port after plugging in camera(usb port gets a new hardware address each time camera gets plugged in)
+find that hardware address in network manager (ubuntu) 
+not all USB cables will work, so try a different cable if the camera is not found after plugging it in
+
+telnet port is open
+login is root / no password 
+file system is read only permission
+If you want to change the write permission, try this line
+mount -o remount,rw devtempfs /
+After making fs writeable, be careful making changes - you can brick the camera.
+to recover from bricking, copy the E1fw.bin firmware onto sd card root, then use notepad++ to create a file named autoexec.ash like this :
+###########
+firmfl prog c:\E1fw.bin
+
+###########
+note the blank line immediately below firmfl prog c:\E1fw.bin.. last line in the file must be blank to work..
+Then the camera will flash a valid firmware and boot again. 
+You must eject your sd card as soon as you read 'update complete' or something like that on the small LCD display. 
+If not ejected, the flash process will start again.
+
+The interface is based on HTTP, most of the request is GET. The format of response is (mostly!) JSON <br>
+
+The format of request is：
+	
+	http://{ip}:{port}/*?param1={p1}[&parame2={p2}]
+
+    
+Response:
+	
+	{
+        "code":0                <-- 0:OK, non 0: NG
+        "desc":"demo"
+        ... other data
+    }
+
+<a name="info"> </a>
+### Query the basic info of camera.
+http://10.98.32.1/info // You can verify if the HTTP is ok or not.
+
+	{
+		"model":"Demo",			// model of camera
+		"sw":"0.0.1"			// fw version
+	}
+
+### Get camera photo number in photo timelapse mode
+http://10.98.32.1/ctrl/timelapse_stat
+
+### Get camera temperature
+http://10.98.32.1/ctrl/temperature
+
+
+<a name="session"> </a>
+### Session
+http://10.98.32.1/ctrl/session[?action=quit]
+
+http://10.98.32.1/ctrl/* interface is for controlling the camera. Only one client can control the camera at the same time. The client own the session can control the camera, otherwise, HTTP status code is 409.</br>
+
+
+	action=quit, quit current session
+	/ctrl/session without arg means heart beat.
+
+** We suggest the App owns the session when it's in foreground**
+How is a session started?
+
+            Every request in /ctrl/* will start a session, unless it return 409 in the status code.
+            If you want to give up the owner ship, you can call /ctrl/session?action=quit
+            And you can keep the session alive with a call /ctrl/session in every 30s
+
+How is the session represented, a token?
+
+            It's base on IP. You don't need to put it in your request.
+
+How does a client know if there is an existing active session?
+
+            If you access he /ctrl/* interface and the status code in HTTP header is 409, it means the camera is owned by other client.
+
+<a name="upgrade"> </a>
+### Upgrade
+/uploadfirmware</br>
+This interface will upload upgrade file to the camera using standard POST, the file will be placed into the root of SDCARD directory。
+
+http://10.98.32.1/ctrl/upgrade?action={action}
+
+    action=ui_check， # Camera will check the file, and need user to confirm upgrade in LCD
+	action=run， # Camera will check file and do upgrade but not display in LCD
+
+<a name="shutdown"> </a>
+### shutdown
+http://10.98.32.1/ctrl/shutdown</br>
+
+<a name="reboot"> </a>
+### reboot
+http://10.98.32.1/ctrl/reboot</br>
+
+<a name="datetime"> </a>
+### Date/time
+http://10.98.32.1/datetime?date={YYYY-MM-DD}&time={hh:mm:ss}</br>
+Set the data/time of camera.
+
+<a name="gallery"> </a>
+### Gallery interface
+#### list out the DCIM folder
+http://10.98.32.1/DCIM/
+
+	{
+		"code":0,
+		"desc":"",
+		"files":[
+			"100MEDIA", "101MEDIA"
+		]
+	}
+It means there are two folder under DCIM : 100MEDIA，101MEDIA.
+
+#### list out the files under folder
+http://10.98.32.1/DCIM/100MEDIA/[?p=1&v=1]
+
+	p=1, list out the photo，*.JPG
+	v=1, list out the video, *.MOV
+
+Response
+
+	{
+		"code":0,
+		"desc":"",
+		"files":[
+			"ABCD0001.MOV", "ABCD0002.MOV"
+		]
+	}
+
+#### Download file
+http://10.98.32.1/DCIM/100MEDIA/EYED0001.MOV</br>
+Just like the file request in HTTP. Range operation is supported.
+
+#### Delete file
+http://10.98.32.1/DCIM/100MEDIA/EYED0001.MOV?act=rm
+
+#### Get video file info
+http://10.98.32.1/DCIM/100MEDIA/EYED0001.MOV?act=info
+{"code":0,"desc":"","msg":"","w":3840,"h":2160,"vts":90000,"vcnt":256,"dur":768768}
+w is width in pixels, h is height in pixels, vts is Video TimeScale, duration = dur/vts
+
+#### Get thumbnail
+http://10.98.32.1/DCIM/100MEDIA/EYED0001.MOV?act=thm
+The format of thumbnail is BMP or JPEG, please check the MIME type in HTTP response.
+
+### Get ScreenNail
+http://10.98.32.1/DCIM/100MEDIA/EYED0001.JPG?act=scr
+
+### Get the file create time
+http://10.98.32.1/DCIM/100MEDIA/EYED0001.JPG?act=ct </br>
+Response
+
+	{
+		"code":0,
+		"desc":"",
+		"msg":1479463832  # file create time，it's Unix timestamp
+	}
+
+### Get file MD5 value
+http://10.98.32.1/DCIM/100MEDIA/EYED0001.JPG?act=md5 </br>
+Response
+
+	{
+		"code":0,
+		"desc":"",
+		"msg":"e729f0091f62d7e6437b0dbb5088816"  # MD5 value
+	}
+
+<a name="mode"> </a>
+### Mode operation
+
+Camera have three mode：
+
+- Record
+- Capture， // will have subpattern, e.g timelapse
+- Playback
+
+#### Query
+http://10.98.32.1/ctrl/mode?action=query 
+
+Response
+
+	{
+		"code":0
+		"desc":""
+		"msg":"pb"              <-- pb, pb_ing, pb_paused,
+									 cap, cap_tl_ing, cap_tl_idle, cap_idle,cap_burst
+									 rec, rec_ing,
+									 unknown
+
+	}
+	
+#### Switch
+	http://10.98.32.1/ctrl/mode?action=to_pb, switch to playback mode
+	http://10.98.32.1/ctrl/mode?action=to_cap, switch to still mode
+	http://10.98.32.1/ctrl/mode?action=to_rec, switch to movie mode
+	
+Response
+
+    {
+        "code":0    <---- 0 is OK, other is NG
+        "desc":""
+        "msg":""
+    }
+
+
+<a name="still"> </a>
+### Still capture
+http://10.98.32.1/ctrl/still?action={cap}
+
+	action=cap # capture
+	action=single # force to single capture
+	action=remain # query the number of remaining capture number
+	action=cancel_burst # if camera in burst mode, this interface will stop burst action
+	
+Response
+
+    {
+        "code":0     
+        "desc":""
+        "msg":"/DCIM/100MEDIA/ABC_0001.JPG"
+    }
+
+<a name="recording"> </a>
+### Movie
+http://10.98.32.1/ctrl/rec?action={start}
+ 
+	action=start
+	action=stop
+	action=remain
+	
+Response
+
+    {
+        "code":0     
+        "desc":""
+        "msg":"/DCIM/100MEDIA/ABC_0001.MOV"  
+    }
+
+<a name="setting"> </a>
+### Setting
+#### Query
+http://10.98.32.1/ctrl/get?k={key}</br>
+There are three types for setting: string, option, range <br>
+String:
+
+	{
+		"code":0,			 	// 0 means OK, otherwise is NG
+		"desc":"desc...",		// 
+		"key":"ssid",			// key
+		"type":2,				// 2 means it's a string type
+		"ro":0,					// 0 means changeable, otherwise is read only
+		"value":"ABCDEFG",		// value
+	}
+Option:
+
+	{
+		"code":0,			 	// 0 means OK, otherwise is NG
+		"desc":"desc...",		// 
+		"key":"photosize",		// key
+		"type":1,				// 1 means it's a option type.
+		"ro":0,					// 0 means changeable, otherwise is read only
+		"value":"17M",			// value
+		"opts":["12M","8M","5M","3M","XGA","VGA","9M"] // valid options
+	}
+Range:
+
+	{
+		"code":0,			 	// 0 means OK, otherwise is NG
+		"desc":"desc...",		// 
+		"key":"iso",			// key
+		"type":0,				// 0 means it's a range type.
+		"ro":0,					// 0 means changeable, otherwise is read only
+		"value":50,				// value
+		"min":0,
+		"max":100,
+		"step":1
+	}
+
+Valid settings： (if set to read only try changing setting using camera buttons to adjust (not menu)..this worked for shutter speed)
+
+	ssid [ABCDEF] //set Wi-Fi SSID, string type, read only, doesn't work, alias for AP_SSID (try in usb networking)
+	ap_key [ABCDEF] // doesn't work, query returns code -1 without this key, supposed to set Wi-Fi passwd 
+	movfmt [4KP30, 4KP24, 4096P24, 2160P30 (4:3), 2160P24 (4:3), 1920P30 (1:1), 1920P24 (1:1), 1440P30 (4:3), 1440P24 (4:3), 1080P60, 1080P30, 1080P24, 720P240, 720P120, 720P60, 960P120 (4:3), SVGAP120, WVGAP30, 384P240 (4:3)] 
+	photosize [16M, 12M, 8M, 5M, 3M] //size of photo
+	wb [Auto, Manual] //white balance
+	iso [Auto, 100, 125, 160, 200, 250, 320, 400, 500, 640, 800, 1000, 1250, 1600, 2000, 2500, 3200, 4000, 5000, 6400, 8000, 10000, 12800, 16000, 20000, 256000, 51200, 102400]
+	sharpness [0 to 6] //range type, step 1, incorrect from github docs 
+	sharpness [Weak, Normal, Strong] // from query of camera
+	contrast [0 to 256] //range type, step 1
+	saturation [0 to 256] //range type, step 1
+	brightness [-256 to 256] // image brightness, range type, step 1
+	meter_mode [Center, Average, Spot]
+	flicker [Auto, 50Hz, 60Hz]
+	video_system [NTSC, PAL]
+	video_output [On, Off] // turn on/off CVBS output
+	ev [-96 to 96] // exposure value, range type, step 1 (only used in Program AE mode)
+	battery [0 to 100] // read only, battery charge percentage
+	lcd [On, Off] // turn on/off LCD
+	rotation [Normal, Upside Down] // camera stream rotation
+	mag_pos [0 to 65536000] // magnify position (see description below), range type, step 1 default 32768500 (middle?)
+	focus [AF，MF] // Auto Focus or Manual Focus
+	iris [3.5, 4, 4.5, 5, 5.6, 6.3, 7.1, 8, 9, 10, 11, 13, 14, 16, 18, 20, 22] // code -1 without this key
+	af_mode [Normal, Selection] //Auto Focus Mode
+	af_area [2 to 256] // read only, query current autofocus, range type, area step 0
+	mf_drive [0 to -3] // m focus drive?, range type, step 0?
+	photo_q [Basic, Fine, S.Fine, JPEG + DNG] //Photo quality
+	led [On, Off] // turn on/off camera LED
+	beep [On, Off] // turn on/off camera beep
+	max_exp [Auto, 1/2s, 1/3s, 1/4s, 1/5s, 1/8s, 1/10s, 1/15s, 1/20s, 1/25s, 1/30s, 1/40s, 1/50s, 1/60s, 1/80s, 1/100s, 1/125s, 1/160s, 1/200s, 1/250s, 1/320s] // Max exposure time
+	shutter_angle [Auto, 45\u00b0, 90\u00b0, 108\u00b0, 144\u00b0, 172.8\u00b0, 180\u00b0, 216\u00b0, 270\u00b0, 324\u00b0,360\u00b0] shutter angle in degrees
+	mwb [2300 to 7500] // manual white balance, range type, step 100
+	lens_zoom [stop, in, out] //
+	lens_focus_pos [-1, 32767] // range type, step 1
+	lens_focus_spd [1-64] //range type, step 1
+	shutter_spd [Auto, 8", 6", 5", 4", 3.2", 2.5", 2", 1.6", 1.3", 1", 0.8", 0.6", 0.5", 0.4", 0.3", 1/4, 1/5, 1/6, 1/8, 1/10, 1/13, 1/15, 1/20, 1/25, 1/30, 1/40, 1/50, 1/60, 1/80, 1/100, 1/125, 1/160, 1/200, 1/250, 1/320, 1/400, 1/500, 1/640, 1/800, 1/1000, 1/1250, 1/1600, 1/2000, 1/2500, 1/3200, 1/4000, 1/5000, 1/6400, 1/8000] // shutter speed in seconds
+	caf_range [Far, Near ,Normal] //continuous auto focus range
+	caf_sens [High, Middle, Low]  // continuous auto focus sensitivity
+	burst_spd [L, L1, M, H]  // burst speed
+	lut [sRGB, Z-LOG] // Look Up Table
+	last_file_name [ABCDEF] // query SD Card for last file name, read only, string type
+	camera_rot [0\u00b0, 90\u00b0, 180\u00b0, 270\u00b0] // rotate camera image in degrees 
+	multiple_mode, // [none, master, slave]
+	dewarp [On, Off]  // Distortion correction
+	vignette [On, Off] // Vignette correction
+	noise_reduction [Weak, NormalNoise, Strong] // Noise reduction
+	tint [-100,100] // range type, step 1
+	file_number [Continuous, Auto reset] // Unknown purpose
+	lcd_backlight [10, 100] // range type, step 10 
+	hdmi_fmt [Auto] // read only HDMI output resolution
+	led [On, Off] // turn on/off LED 
+	multiple_id [-1 to 200] //range type, step 1
+	multiple_delay [0 to 5000] //range type, step 1
+	shoot_mode [Program AE, Aperture priority, Shutter priority, Manual mode] // Capture mode, exposure mode，P/A/S/M
+	ois_mode [Off] // read only, set to Off, lens Optical Image Stabilizer function
+	split_duration [5min, 10min, 20min, 30min] // read only set to 5min / length of video time 5 min max for FAT formatted SD card , exFAT is 5/10/20/30 min
+	multiple_to // multiple timeout, unknown
+	liveview_audio [On, Off]// turn on/off liveview with audio
+	max_iso [100, 125, 160, 200, 250, 320, 400, 500, 640, 800, 1000, 1250, 1600, 2000, 2500, 3200, 4000, 5000, 6400] only used with Program AE mode
+	dhcp // enable dhcp, unknown
+	Fn [setting, magnify, ev, iris, focus, wifi // Fn key function
+	auto_off ["0","30","60","120","240","480","900"] //turn off camera 
+	auto_off_lcd ["0","30","60","120","240","480","900"] //turn off lcd 
+	photo_tl_num [2 to 100] // read only, photo timelapse mode, max capture number, range type, step 1
+	photo_tl_interval [1 to 1799] //read only, photo timelapse interval, range type, step 1 
+	caf [0,1] // turn on/off continuous auto focus 
+	hdmi_osd [0,1] // turn on/off HDMI On Screen Display
+	F2 [onoff_lcd, magnify, switch_mode] // F2 key function
+	drive_mode [single, continuous, time_lapse, self-timer]
+	grid_display [0,3,5] // display 3x3 or 5x5 grid on LCD screen
+	photo_self_interval [3, 10] // unknown?
+	focus_area [0,1] // autofocus area
+	level_correction [0,1] // turn on/off level correction
+	WIFI_MODE [ap, sta] //switch wifi mode in ap/sta (only ap mode works)
+	record_mode [unknown] // returns code :-1 without this key
+	record_tl_interval [unknown] // returns code :-1 without this key
+	wifi [On, Off] // turn wifi on/off
+	
+	
+#### Change setting
+We MUST read the setting before we set it, as we need to know the valid range/options first.</br>
+
+http://10.98.32.1/ctrl/set?{key}={value}</br>
+http://10.98.32.1/ctrl/set?photosize=12M
+
+    {
+    	"code":0                // 0 means OK, otherwise is NG
+    	"desc":""
+    }
+
+#### Clear setting
+http://10.98.32.1/ctrl/set?action=clear
+
+<a name="focus"></a>
+### Focus method
+
+http://10.98.32.1/ctrl/set?focus=AF # AF
+http://10.98.32.1/ctrl/set?focus=MF # MF
+
+When using AF, there two method for it.
+
+* Center
+* Flexible
+
+http://10.98.32.1/ctrl/set?af_method={param}
+	
+	af_method=Normal
+	af_method=Selection
+
+<a name="af"> </a>
+###AF
+Camera focus area can be changed by http interface </br>
+http://10.98.32.1/ctrl/af?pos={index}
+
+	pos=index, index is 32 bits int, high 16 bits is for X, low 16 bits is for Y.
+	We mark the camera preview into X(Y) (X direction and Y direction) evenly by 16 in each line.
+	When you mark a certain point X(Y) as 1, you set the point as your focus area.
+
+    In the 16 x 16 matrix, X(Y),  all of the points you set as focus area should be in a rectangle and should be continuous. 
+
+e.g.</br>
+pos = ((0x6<<16) | 0x003c represents that (1,2) on the X direction and (2,3,4,5) on the Y direction consist the focus area (2x4=8 points in total).
+	
+	 |－－－－|－－－－|－－－－|－－－－|
+	| o o o o o o o o o o o o o o o o |
+	| o o o o o o o o o o o o o o o o |
+ 	| o x x o o o o o o o o o o o o o |
+ 	| o x x o o o o o o o o o o o o o |
+ 	| o x x o o o o o o o o o o o o o |
+ 	| o x x o o o o o o o o o o o o o |
+ 	| o o o o o o o o o o o o o o o o |
+ 	| o o o o o o o o o o o o o o o o |
+ 	| o o o o o o o o o o o o o o o o |
+ 	| o o o o o o o o o o o o o o o o |
+ 	| o o o o o o o o o o o o o o o o |
+ 	| o o o o o o o o o o o o o o o o |
+ 	| o o o o o o o o o o o o o o o o |
+ 	| o o o o o o o o o o o o o o o o |
+ 	| o o o o o o o o o o o o o o o o |
+ 	| o o o o o o o o o o o o o o o o |
+ 	-----------------------------------
+
+When you are trying to realize this function by cell phone, note the picture ratio is different under video mode and still mode.
+   Video is 16:9 and still is 4:3. The size of the area should be adjusted according to the ratio.
+
+<a name="mag"> </a>
+### Magnify
+It's used for MF assistant. It's not available for recording.
+
+http://10.98.32.1/ctrl/mag?action={enable}[&pos={position}]
+
+	action=enable # turn on magnify
+	action=disable # turn off magnify
+	action=query # query magnify status - code:0 is off / code:1 is on
+	
+	pos=position, high 16 bits is for X，low 16 bits is for Y.
+	              It's a normalized value. 0－1000 means 0%-100%
+	              e.g.
+	              (0 << 16) | 0         top-left
+	              (500 << 16) | 500     center
+	              (1000 << 16) | 1000   bottom-right
+
+### SDCARD
+http://10.98.32.1/ctrl/card?action={format}
+
+	action=format, format card, default format FAT32
+	action=present，if the card is present
+	action=fat32,  format card to FAT32
+	action=exfat,  format card to exFAT
+
+<a name="streaming"> </a>
+###Streaming
+The server address is 10.98.32.1 and port is 9876. It's a TCP based server.<br>
+Fetch one frame:<br>
+1. send 0x01(1 byte) to server to request one frame.<br>
+2. recv data (4 byte payload len + following the frame data)<br>
+3. repeat the step1/step2 to get more frames.<br>
+
+Data format in payload:<br>
+Each payload of the data is H.264 encoded data. If the fps is 30, you can get 30 H.264 data in one second.
+
+Streaming Resolution for movfmt setting 
+432x240 in 4K mode
+640x480 in all 4/3 modes
+640x640 in all 1:1 modes
+848x480 in 1080, 720 and WVGA modes
+
+
+
